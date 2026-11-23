@@ -1,8 +1,8 @@
-"""
-SentinelGuard
+"""Explore synthetic card transactions with a small fraud-detection dashboard.
 
-A small Streamlit app for looking at synthetic card transactions and
-checking how a few common machine-learning methods handle fraud detection.
+Run the app locally with ``streamlit run app.py``. The transaction data is
+generated for demonstration purposes and should not be used to make real
+financial decisions.
 """
 
 import numpy as np
@@ -32,6 +32,9 @@ st.set_page_config(
     layout="wide",
 )
 
+DEFAULT_SEED = 42
+FRAUD_RATE = 0.05
+
 FEATURES = [
     "Transaction_Amount",
     "Hour_Of_Day",
@@ -41,38 +44,38 @@ FEATURES = [
 ]
 
 
-def make_transactions(count=500, seed=42):
-    """Create a repeatable dataset with mostly normal transactions."""
+def make_transactions(count=500, seed=DEFAULT_SEED) -> pd.DataFrame:
+    """Build a reproducible sample of legitimate and fraudulent transactions."""
     rng = np.random.default_rng(seed)
 
-    normal_count = count - int(round(count * 0.05))
-    fraud_count = count - normal_count
+    fraud_count = int(round(count * FRAUD_RATE))
+    legitimate_count = count - fraud_count
 
-    normal = pd.DataFrame(
+    legitimate = pd.DataFrame(
         {
             "Transaction_Amount": np.round(
-                rng.gamma(shape=2.0, scale=75.0, size=normal_count).clip(
+                rng.gamma(shape=2.0, scale=75.0, size=legitimate_count).clip(
                     5.0, 1800.0
                 ),
                 2,
             ),
-            "Hour_Of_Day": rng.integers(7, 21, size=normal_count),
-            "Account_Age_Days": rng.integers(120, 2000, size=normal_count),
+            "Hour_Of_Day": rng.integers(7, 21, size=legitimate_count),
+            "Account_Age_Days": rng.integers(120, 2000, size=legitimate_count),
             "Failed_Pin_Attempts": rng.choice(
                 [0, 1, 2],
-                size=normal_count,
+                size=legitimate_count,
                 p=[0.84, 0.13, 0.03],
             ),
             "Is_International": rng.choice(
                 [0, 1],
-                size=normal_count,
+                size=legitimate_count,
                 p=[0.90, 0.10],
             ),
-            "Is_Fraud": np.zeros(normal_count, dtype=int),
+            "Is_Fraud": np.zeros(legitimate_count, dtype=int),
         }
     )
 
-    suspicious = pd.DataFrame(
+    fraudulent = pd.DataFrame(
         {
             "Transaction_Amount": np.round(
                 rng.normal(loc=950.0, scale=320.0, size=fraud_count).clip(
@@ -100,7 +103,7 @@ def make_transactions(count=500, seed=42):
         }
     )
 
-    data = pd.concat([normal, suspicious], ignore_index=True)
+    data = pd.concat([legitimate, fraudulent], ignore_index=True)
 
     risk = (
         10.0
@@ -109,7 +112,7 @@ def make_transactions(count=500, seed=42):
         - 0.012 * data["Account_Age_Days"]
         + 9.5 * data["Failed_Pin_Attempts"]
         + 14.0 * data["Is_International"]
-        + rng.normal(0.0, 4.0, size=count)
+        + rng.normal(0.0, 4.0, size=len(data))
     )
     data["Risk_Score"] = np.round(np.clip(risk, 0.0, 100.0), 1)
 
@@ -117,8 +120,9 @@ def make_transactions(count=500, seed=42):
 
 
 @st.cache_resource
-def train_models():
-    data = make_transactions(count=500, seed=42)
+def train_models() -> dict:
+    """Fit the models used by the dashboard and collect their evaluation data."""
+    data = make_transactions(count=500, seed=DEFAULT_SEED)
     X = data[FEATURES]
     y = data["Is_Fraud"]
 
@@ -127,7 +131,7 @@ def train_models():
         X,
         y,
         test_size=0.20,
-        random_state=42,
+        random_state=DEFAULT_SEED,
         stratify=y,
     )
 
@@ -138,7 +142,7 @@ def train_models():
     classifier = LogisticRegression(
         max_iter=1000,
         class_weight="balanced",
-        random_state=42,
+        random_state=DEFAULT_SEED,
     )
     classifier.fit(train_scaled, y_train)
 
@@ -175,7 +179,7 @@ def train_models():
         X_amount,
         y_score,
         test_size=0.20,
-        random_state=42,
+        random_state=DEFAULT_SEED,
     )
     linear_model = LinearRegression()
     linear_model.fit(amount_train, score_train)
@@ -186,9 +190,9 @@ def train_models():
         X,
         y_score,
         test_size=0.20,
-        random_state=42,
+        random_state=DEFAULT_SEED,
     )
-    full_tree = DecisionTreeRegressor(random_state=42)
+    full_tree = DecisionTreeRegressor(random_state=DEFAULT_SEED)
     full_tree.fit(tree_train, tree_score_train)
 
     # Clustering
@@ -226,7 +230,8 @@ def train_models():
     }
 
 
-def get_risk_badge(probability):
+def get_risk_badge(probability: float) -> dict[str, str]:
+    """Choose the label and colors shown for a predicted fraud probability."""
     if probability < 0.30:
         return {
             "label": "SAFE - APPROVE TRANSACTION",
@@ -252,7 +257,8 @@ def get_risk_badge(probability):
     }
 
 
-def show_risk_badge(probability):
+def show_risk_badge(probability: float) -> None:
+    """Render the risk level as a colored callout in the app."""
     style = get_risk_badge(probability)
     st.markdown(
         f"""
@@ -275,7 +281,8 @@ def show_risk_badge(probability):
     )
 
 
-def draw_coefficients(coefficients):
+def draw_coefficients(coefficients: pd.DataFrame) -> plt.Figure:
+    """Plot each standardized model coefficient and its direction."""
     fig, ax = plt.subplots(figsize=(6.4, 4.2))
     bar_colors = [
         "#2E8B57" if value < 0 else "#D64545"
@@ -319,7 +326,8 @@ def draw_coefficients(coefficients):
     return fig
 
 
-def main():
+def main() -> None:
+    """Build the dashboard and handle its interactive sections."""
     models = train_models()
     data = models["data"]
 
@@ -621,7 +629,7 @@ def main():
         )
         limited_tree = DecisionTreeRegressor(
             max_depth=max_depth,
-            random_state=42,
+            random_state=DEFAULT_SEED,
         )
         limited_tree.fit(
             models["tree_train"],
@@ -789,4 +797,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
