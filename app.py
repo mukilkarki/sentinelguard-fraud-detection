@@ -700,7 +700,7 @@ def main():
             feature_names=FEATURES,
             filled=True,
             rounded=True,
-            fontsize=8.5,
+            fontsize=9,
             ax=ax,
         )
         ax.set_title(f"Decision tree (maximum depth {max_depth})")
@@ -789,3 +789,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
